@@ -1,4 +1,16 @@
 {
+    "weather": {
+        "description": "🌤 通用天气设置",
+        "type": "object",
+        "items": {
+            "default_location": {
+                "description": "📍 默认查询地点（/天气 不带参数时使用）",
+                "type": "string",
+                "default": "番禺",
+                "hint": "当使用 /天气 命令且不带地点参数时，默认查询此地的天气。例如：番禺、广州、北京"
+            }
+        }
+    },
     "nlp_weather": {
         "description": "💬 自然语言天气识别",
         "type": "object",
@@ -28,10 +40,10 @@
                 "hint": "开启后，将在设定的时间自动推送天气信息到指定会话"
             },
             "reminder_cron": {
-                "description": "🕐 推送时间 (cron 表达式)",
+                "description": "🕐 推送时间（支持 HH:MM 或 cron 格式）",
                 "type": "string",
-                "default": "0 7 * * *",
-                "hint": "cron 表达式格式。默认每天早上7点推送。例如 30 8 * * * 表示每天8点30分"
+                "default": "07:30",
+                "hint": "支持两种格式：\n1. HH:MM 格式，如 07:30（推荐）\n2. cron 表达式，如 0 7 * * *\n设为 --:-- 或留空表示不启用定时推送"
             },
             "reminder_targets": {
                 "description": "📋 推送目标会话列表 (UMO)",

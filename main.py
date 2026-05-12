@@ -449,7 +449,6 @@ class TqPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self.config = config or {}
-        self.default_loc = self.config.get("default_location", "番禺")
         self.start_time = time.time()
         self._cache_hit = 0
         self._cache_miss = 0
@@ -458,6 +457,11 @@ class TqPlugin(Star):
         self._reminder_job_id = None
 
     # ── 配置读取辅助 ──
+
+    @property
+    def default_loc(self):
+        """动态读取默认地点，支持配置热更新"""
+        return self._get_cfg("default_location", "番禺")
 
     def _get_cfg(self, key: str, default=None):
         """读取配置，同时兼容扁平 key 和 _conf_schema 嵌套格式。"""
@@ -481,6 +485,31 @@ class TqPlugin(Star):
                         return val
         return default
 
+    # ── 时间格式解析 ──
+
+    @staticmethod
+    def _parse_time_to_cron(time_str: str) -> str | None:
+        """将时间字符串转换为 cron 表达式。
+
+        支持格式：
+        - HH:MM（如 07:30）→ 自动转 cron
+        - cron 表达式（如 0 7 * * *）→ 原样返回
+        - --:-- 或 空或None → 返回 None（不启用）
+        """
+        if not time_str:
+            return None
+        s = time_str.strip()
+        if not s or s == '--:--':
+            return None
+        # 尝试匹配 HH:MM 格式
+        m = re.match(r'^(\d{1,2}):(\d{2})$', s)
+        if m:
+            h, mi = int(m.group(1)), int(m.group(2))
+            if 0 <= h <= 23 and 0 <= mi <= 59:
+                return f"{mi} {h} * * *"
+        # 否则当作 cron 原样返回
+        return s
+
     # ── 定时提醒 ──
 
     async def _register_reminder(self):
@@ -489,7 +518,11 @@ class TqPlugin(Star):
         if not enabled:
             logger.info("天气提醒未启用，跳过定时注册。")
             return
-        cron = self._get_cfg("reminder_cron", "0 7 * * *")
+        raw = self._get_cfg("reminder_cron", "07:30")
+        cron = self._parse_time_to_cron(raw)
+        if not cron:
+            logger.info("天气提醒时间未设置（--:-- 或空），跳过定时注册。")
+            return
         cm = getattr(self.context, "cron_manager", None)
         if not cm:
             logger.warning("cron_manager 不可用，天气提醒注册失败。")
@@ -670,7 +703,11 @@ class TqPlugin(Star):
 
         # 提醒状态
         reminder_enabled = self._get_cfg("reminder_enabled", False)
-        reminder_cron = self._get_cfg("reminder_cron", "0 7 * * *")
+        reminder_cron_raw = self._get_cfg("reminder_cron", "07:30")
+        reminder_cron_display = reminder_cron_raw
+        cron_parsed = self._parse_time_to_cron(reminder_cron_raw)
+        if cron_parsed and cron_parsed != reminder_cron_raw:
+            reminder_cron_display = f"{reminder_cron_raw}（cron: {cron_parsed}）"
         reminder_loc = self._get_cfg("reminder_location", self.default_loc)
         reminder_targets = self._get_cfg("reminder_targets", [])
         reminder_status = "✅ 已启用" if (reminder_enabled and self._reminder_job_id) else "⛔ 未启用"
@@ -702,7 +739,7 @@ class TqPlugin(Star):
             f"",
             f"⏰ 【天气提醒推送】",
             f"  状态：{reminder_status}",
-            f"  时间：{reminder_cron}",
+            f"  时间：{reminder_cron_display}",
             f"  地点：{reminder_loc}",
             f"  目标：{len(reminder_targets)} 个会话",
         ]
