@@ -1,0 +1,50 @@
+{
+    "nlp_weather": {
+        "description": "💬 自然语言天气识别",
+        "type": "object",
+        "items": {
+            "nlp_weather_enabled": {
+                "description": "✅ 启用自然语言天气查询",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后，当用户消息中包含「天气」「下雨」「温度」等关键词时，Bot 会自动查询并回复天气信息"
+            },
+            "nlp_weather_fallback": {
+                "description": "📍 地点识别失败时的默认查询地点",
+                "type": "string",
+                "default": "广州",
+                "hint": "当无法从用户消息中提取具体地点时，将查询此地的天气。例如：广州、北京、上海"
+            }
+        }
+    },
+    "reminder_settings": {
+        "description": "⏰ 天气提醒定时推送",
+        "type": "object",
+        "items": {
+            "reminder_enabled": {
+                "description": "✅ 启用天气定时提醒",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后，将在设定的时间自动推送天气信息到指定会话"
+            },
+            "reminder_cron": {
+                "description": "🕐 推送时间 (cron 表达式)",
+                "type": "string",
+                "default": "0 7 * * *",
+                "hint": "cron 表达式格式。默认每天早上7点推送。例如 30 8 * * * 表示每天8点30分"
+            },
+            "reminder_targets": {
+                "description": "📋 推送目标会话列表 (UMO)",
+                "type": "list",
+                "default": [],
+                "hint": "输入完整的 UMO。可通过 /sid 指令获取。格式: {平台名}:{消息类型}:{会话ID}"
+            },
+            "reminder_location": {
+                "description": "📍 推送地点",
+                "type": "string",
+                "default": "番禺",
+                "hint": "推送天气时查询的地点。例如：番禺、北京、上海"
+            }
+        }
+    }
+}
