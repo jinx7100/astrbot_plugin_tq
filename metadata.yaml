@@ -1,0 +1,21 @@
+name: astrbot_plugin_tq
+display_name: 理予的天气
+author: jinx7100
+desc: |-
+  基于 Open-Meteo 免费 API 的天气查询插件。
+  
+  ✨ 功能特性：
+  - 实时天气 + 体感温度 + 湿度 + 风速
+  - 3天逐日预报 + 24h逐时温度曲线图
+  - 智能带伞提醒（降雨概率 ≥ 50%）
+  - WMO 极端天气预警
+  - 自然语言天气触发（如"今天下雨了吗？"）
+  - 每日定时推送天气简报
+  - 无需 API Key，完全免费
+repo: https://github.com/jinx7100/astrbot_plugin_tq
+version: v2.2.0
+tags:
+  - 天气
+  - 预报
+  - 工具
+  - Open-Meteo
