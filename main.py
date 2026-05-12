@@ -5,8 +5,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from scipy.interpolate import make_interp_spline
 from PIL import Image as ImageW
+
+import jieba
 
 from astrbot.api.event import AstrMessageEvent, filter, MessageChain
 from astrbot.api.star import Context, Star, register
@@ -17,6 +18,64 @@ from astrbot.core.platform.message_session import MessageSession
 
 GEO_API  = "https://geocoding-api.open-meteo.com/v1/search"
 WEA_API  = "https://api.open-meteo.com/v1/forecast"
+
+# ── 城市词库（用于 jieba NLP 地点提取） ──
+CITY_LEXICON = {
+"北京","上海","广州","深圳","杭州","成都","武汉","西安","南京","重庆","天津","苏州",
+"长沙","郑州","东莞","青岛","沈阳","宁波","昆明","大连","厦门","合肥","佛山","福州",
+"哈尔滨","济南","温州","长春","石家庄","常州","泉州","南宁","贵阳","南昌","太原",
+"烟台","嘉兴","南通","金华","珠海","惠州","徐州","海口","乌鲁木齐","呼和浩特",
+"银川","西宁","兰州","拉萨","桂林","洛阳","邯郸","威海","扬州","绍兴","保定",
+"廊坊","唐山","秦皇岛","张家口","承德","沧州","衡水","邢台","大同","阳泉","长治",
+"晋城","朔州","忻州","吕梁","晋中","临汾","运城","包头","乌海","赤峰","通辽",
+"鄂尔多斯","呼伦贝尔","巴彦淖尔","乌兰察布","兴安盟","锡林郭勒","阿拉善","鞍山",
+"抚顺","本溪","丹东","锦州","营口","阜新","辽阳","盘锦","铁岭","朝阳","葫芦岛",
+"吉林","四平","辽源","通化","白山","松原","白城","延边","齐齐哈尔","鸡西","鹤岗",
+"双鸭山","大庆","伊春","佳木斯","七台河","牡丹江","黑河","绥化","大兴安岭","无锡",
+"连云港","淮安","盐城","镇江","泰州","宿迁","湖州","绍兴","金华","衢州","舟山",
+"台州","丽水","芜湖","蚌埠","淮南","马鞍山","淮北","铜陵","安庆","黄山","滁州",
+"阜阳","宿州","六安","亳州","池州","宣城","莆田","三明","漳州","南平","龙岩",
+"宁德","景德镇","萍乡","九江","新余","鹰潭","赣州","吉安","宜春","抚州","上饶",
+"淄博","枣庄","东营","潍坊","济宁","泰安","日照","临沂","德州","聊城","滨州",
+"菏泽","开封","洛阳","平顶山","安阳","鹤壁","新乡","焦作","濮阳","许昌","漯河",
+"三门峡","南阳","商丘","信阳","周口","驻马店","黄石","十堰","宜昌","襄阳","鄂州",
+"荆门","孝感","荆州","黄冈","咸宁","随州","恩施","株洲","湘潭","衡阳","邵阳",
+"岳阳","常德","张家界","益阳","郴州","永州","怀化","娄底","湘西","韶关","汕头",
+"江门","湛江","茂名","肇庆","惠州","梅州","汕尾","河源","阳江","清远","中山",
+"潮州","揭阳","云浮","柳州","桂林","梧州","北海","防城港","钦州","贵港","玉林",
+"百色","贺州","河池","来宾","崇左","三亚","三沙","儋州","自贡","攀枝花","泸州",
+"德阳","绵阳","广元","遂宁","内江","乐山","南充","眉山","宜宾","广安","达州",
+"雅安","巴中","资阳","阿坝","甘孜","凉山","六盘水","遵义","安顺","毕节","铜仁",
+"黔西南","黔东南","黔南","曲靖","玉溪","保山","昭通","丽江","普洱","临沧","楚雄",
+"红河","文山","西双版纳","大理","德宏","怒江","迪庆","日喀则","昌都","林芝","山南",
+"那曲","阿里","铜川","宝鸡","咸阳","渭南","延安","汉中","榆林","安康","商洛",
+"嘉峪关","金昌","白银","天水","武威","张掖","平凉","酒泉","庆阳","定西","陇南",
+"临夏","甘南","海东","海北","黄南","海南","果洛","玉树","海西","石嘴山","吴忠",
+"固原","中卫","克拉玛依","吐鲁番","哈密","昌吉","博尔塔拉","巴音郭楞","阿克苏",
+"克孜勒苏","喀什","和田","伊犁","塔城","阿勒泰","番禺","天河","越秀","海珠",
+"荔湾","白云","黄埔","花都","南沙","从化","增城","福田","罗湖","南山","盐田",
+"宝安","龙岗","龙华","坪山","光明","朝阳","海淀","丰台","西城","东城","通州",
+"大兴","顺义","昌平","房山","浦东","徐汇","黄浦","静安","长宁","虹口","杨浦",
+"普陀","闵行","宝山","松江","嘉定","青浦","奉贤","崇明","武侯","锦江","青羊",
+"金牛","成华","高新","天府","雁塔","碑林","莲湖","未央","长安","江宁","鼓楼",
+"玄武","秦淮","建邺","栖霞","雨花","吴中","姑苏","虎丘","吴江","萧山","余杭",
+"西湖","拱墅","上城","滨江","临平","钱塘","洪山","武昌","江汉","江岸","硚口",
+"汉阳","青山","东西湖","江夏","黄陂","新洲","岳麓","芙蓉","天心","开福","雨花",
+"望城","禅城","南海","顺德","三水","高明","莞城","东城","南城","万江","长安",
+"厚街","虎门","常平","塘厦","寮步","石龙","石碣","松山湖","中山","香洲","金湾",
+"斗门","濠江","南澳","澄海","潮阳","潮南","揭东","普宁","陆丰","海丰","惠东",
+"博罗","龙门","台山","开平","鹤山","恩平","四会","高要","广宁","德庆","封开",
+"怀集","端州","鼎湖","源城","东源","和平","连平","龙川","紫金","梅县","兴宁",
+"五华","丰顺","蕉岭","大埔","平远","乳源","乐昌","南雄","始兴","仁化","翁源",
+"新丰","连州","英德","连山","连南","阳山","清新","佛冈","顺德","容桂","大良",
+"伦教","勒流","北滘","陈村","乐从","均安","杏坛","龙江","九江","西樵","丹灶",
+"狮山","大沥","里水","桂城","石岐","东区","西区","南区","五桂山","小榄","古镇",
+"三角","民众","南朗","港口","大涌","沙溪","横栏","东升","东凤","南头","黄圃",
+"三乡","板芙","神湾","坦洲","沙田","桥头","横沥","东坑","企石","石排","茶山",
+"中堂","麻涌","望牛墩","道滘","洪梅","高埗","谢岗","清溪","凤岗","黄江","大朗"}
+# 注册到 jieba 用户词典
+for c in CITY_LEXICON:
+    jieba.add_word(c)
 
 # ── WMO 天气码 ──
 # (中文名, 图标分类, 带伞标志, 极端标志)
@@ -43,20 +102,21 @@ ICONS = {
     "foggy":"foggy.png","rainy":"rainy.png","snowy":"snowy.png",
 }
 
-# ── 缓存 ──
+# ── 缓存（带线程锁） ──
 _cache = {}
+_cache_lock = __import__('threading').Lock()
 CACHE_TTL = 1800  # 30 分钟
 
 def _cache_get(key):
-    global _cache
-    ent = _cache.get(key)
+    with _cache_lock:
+        ent = _cache.get(key)
     if ent and time.time() - ent["ts"] < CACHE_TTL:
         return ent["data"]
     return None
 
 def _cache_set(key, data):
-    global _cache
-    _cache[key] = {"ts": time.time(), "data": data}
+    with _cache_lock:
+        _cache[key] = {"ts": time.time(), "data": data}
 
 
 # ── 工具函数 ──
@@ -259,29 +319,28 @@ def _gen_chart(loc_name, hourly_dict, sid, pdir):
         x = np.arange(len(times))
         y = np.array(temps)
         xs = np.linspace(x.min(), x.max(), 300)
-        sp = make_interp_spline(x, y, k=3 if len(temps)>=4 else 1)
-        ys = sp(xs)
-        # 跨平台中文字体探测
-        _font_candidates = [
+        # 用 numpy polyfit 替代 scipy 样条插值
+        deg = min(3, len(temps) - 1)
+        coeffs = np.polyfit(x, y, deg)
+        ys = np.polyval(coeffs, xs)
+        # 中文字体探测：优先插件自带的 font.ttc，再回退系统和 matplotlib 内置
+        fp = None
+        for _f in [
+            os.path.join(pdir, "font.ttc"),       # 插件自带的文泉驿正黑
+            os.path.join(pdir, "fonts", "font.ttc"),
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
             "C:/Windows/Fonts/msyh.ttc",
             "C:/Windows/Fonts/simhei.ttf",
-            "C:/Windows/Fonts/simsun.ttc",
             "/System/Library/Fonts/PingFang.ttc",
             "/System/Library/Fonts/STHeiti Light.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-        ]
-        fp = None
-        for _f in _font_candidates:
+        ]:
             if os.path.exists(_f):
                 fp = _f
                 break
-        if not fp:
-            fp = os.path.join(pdir, "SourceHanSansCN-Regular.otf")
-        pr = fm.FontProperties(fname=fp, size=12)
+        pr = fm.FontProperties(fname=fp, size=12) if fp else fm.FontProperties(size=12)
         fig, ax = plt.subplots(figsize=(16,9), facecolor="#F5F5F5")
         ax.plot(xs, ys, color="#E74C3C", lw=2, zorder=10)
         ax.set_xticks(x)
@@ -332,33 +391,60 @@ def _extract_arg(event: AstrMessageEvent) -> str:
 def _extract_location_nlp(text: str) -> str | None:
     """从自然语言文本中提取天气查询地点关键词
 
-    匹配模式（按优先级）：
-      1. "X天气"、"X下雨"等 —— 地点后紧跟天气词
-      2. "在X"、"到X"、"去X"等 —— 介词+地点
-      3. "X那边"、"X这里"等 —— 地点+方位词
+    使用 jieba 分词 + 城市词库匹配，优先提取已知地名。
+    同时支持正则规则作为备用（处理未注册的地名组合）。
     """
     if not text:
         return None
-    # 模式1: "广州天气"、"番禺下雨"、"北京温度"、"上海气温"
-    m = re.search(r'([\u4e00-\u9fff]{2,5})(?:的)?(?:天气|下雨|下雪|温度|气温|台风|大风|暴雨|雷暴|雾|雪|晴|阴)', text)
+
+    # ── Step 1: jieba 分词 + 词库匹配（准确度高） ──
+    # 先去掉时间词，减少干扰
+    cleaned = re.sub(r'(?:今天|明天|后天|大后天|昨天|前天|周末|下[周星]|这[周星]|下个月?|上个?月)', '', text).strip()
+    words = list(jieba.cut(cleaned))
+
+    # 按长度排序，优先返回最长匹配（"鄂尔多斯" > "鄂尔" 这种）
+    found = [w for w in words if w in CITY_LEXICON]
+    if found:
+        found.sort(key=len, reverse=True)
+        return found[0]
+
+    # ── Step 2: 正则备用（处理未录入词库的组合） ──
+    # 模式: "X天气"、"X下雨" 等
+    m = re.search(r'([\u4e00-\u9fff]{2,5})(?:的)?(?:天气|下雨|下雪|温度|气温|台风|大风|暴雨|雷暴|雾|雪|晴|阴)', cleaned)
     if m:
         return m.group(1)
-    # 模式2: "在广州"、"去北京"、"回番禺"、"到上海"
-    m = re.search(r'(?:在|到|去|回|上|下)([\u4e00-\u9fff]{2,5})(?:的)?(?:天气|下雨|温度|那|这|如何|怎样|怎么样)?', text)
+    # 模式: "在X"、"去X"、"到X"
+    m = re.search(r'(?:在|到|去|回|上|下)([\u4e00-\u9fff]{2,5})(?:的)?(?:天气|下雨|温度|那|这|如何|怎样|怎么样)?', cleaned)
     if m:
         return m.group(1)
-    # 模式3: "广州那边"、"北京这里"
-    m = re.search(r'([\u4e00-\u9fff]{2,5})(?:那边|这里|那里|这边)', text)
+    # 模式: "X那边"、"X这里"
+    m = re.search(r'([\u4e00-\u9fff]{2,5})(?:那边|这里|那里|这边)', cleaned)
     if m:
         return m.group(1)
+
     return None
+
+
+def _build_hourly_dict(hourly_raw):
+    """从原始逐时数据构建 hourly_dict（抽取为公共函数，消除重复）"""
+    if not hourly_raw:
+        return []
+    hourly_dict = []
+    for t, tmp, cd, pr in zip(
+        hourly_raw["time"], hourly_raw["temperature_2m"],
+        hourly_raw["weathercode"],
+        hourly_raw.get("precipitation_probability", [0] * len(hourly_raw["time"]))
+    ):
+        w = WMO.get(cd, ("未知", "not_supported", 0, 0))
+        hourly_dict.append({"t": t, "tmp": tmp, "icon": w[1]})
+    return hourly_dict
 
 
 # ══════════════════════════════════════
 #  插件主类
 # ══════════════════════════════════════
 
-@register("理予的天气", "理予", "查天气、3天预报、极端预警、自动带伞提醒、自然语言天气识别", "2.2.0", "")
+@register("天枢", "理予", "查天气、3天预报、极端预警、自动带伞提醒、自然语言天气识别", "2.3.0", "")
 class TqPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
@@ -467,15 +553,7 @@ class TqPlugin(Star):
         report = _build_report(loc_name, current, daily, hourly_raw)
 
         # 生成图表
-        hourly_dict = []
-        if hourly_raw:
-            for t, tmp, cd, pr in zip(
-                hourly_raw["time"], hourly_raw["temperature_2m"],
-                hourly_raw["weathercode"],
-                hourly_raw.get("precipitation_probability", [0] * len(hourly_raw["time"]))
-            ):
-                w = WMO.get(cd, ("未知", "not_supported", 0, 0))
-                hourly_dict.append({"t": t, "tmp": tmp, "icon": w[1]})
+        hourly_dict = _build_hourly_dict(hourly_raw)
         img = None
         if hourly_dict:
             img = _gen_chart(loc_name, hourly_dict, f"reminder_{int(time.time())}", pdir)
@@ -542,10 +620,18 @@ class TqPlugin(Star):
         args = _extract_arg(event)
         if args and args not in ("怎么样","咋样","怎样","如何","?"):
             q = args
+            # 先尝试直接用参数查，查不到再用 NLP 提取
+            result = self._query_location(q)
+            if not result:
+                # 尝试从自然语言中提取地点
+                nlp_loc = _extract_location_nlp(q)
+                if nlp_loc:
+                    q = nlp_loc
+                    result = self._query_location(q)
         else:
             q = self.default_loc
+            result = self._query_location(q)
 
-        result = self._query_location(q)
         if not result:
             yield event.chain_result([Plain(f"没找到「{q}」，换个说法试试？")])
             return
@@ -557,13 +643,7 @@ class TqPlugin(Star):
 
         report = _build_report(loc_name, current, daily, hourly_raw)
 
-        hourly_dict = []
-        if hourly_raw:
-            for t,tmp,cd,pr in zip(hourly_raw["time"], hourly_raw["temperature_2m"],
-                                     hourly_raw["weathercode"],
-                                     hourly_raw.get("precipitation_probability",[0]*len(hourly_raw["time"]))):
-                w = WMO.get(cd, ("未知","not_supported",0,0))
-                hourly_dict.append({"t":t,"tmp":tmp,"icon":w[1]})
+        hourly_dict = _build_hourly_dict(hourly_raw)
         img = None
         if hourly_dict:
             img = _gen_chart(loc_name, hourly_dict, event.unified_msg_origin, pdir)
@@ -573,7 +653,7 @@ class TqPlugin(Star):
             try: os.remove(img)
             except: pass
         else:
-            yield event.chain_result([Plain(report)])
+            yield event.chain_result([Plain(report + "\n\n（📊 温度图表暂时生成失败，不影响文字预报）")])
 
     # ── 命令: /天气状态 ──
 
@@ -601,7 +681,7 @@ class TqPlugin(Star):
         nlp_status = "✅ 已启用" if nlp_enabled else "⛔ 未启用"
 
         lines = [
-            f"📊 【理予的天气 - 运行状态】",
+            f"📊 【天枢 - 运行状态】",
             f"",
             f"🕐 当前时间：{now_str}",
             f"⏱ 运行时长：{upt_str}",
@@ -692,7 +772,10 @@ class TqPlugin(Star):
         # 查询天气
         result = self._query_location(location)
         if not result:
-            # 查询失败就不回复了，避免尴尬
+            await self.context.send_message(
+                event.unified_msg_origin,
+                MessageChain([Plain(f"唔…理予没查到「{location}」的天气，要不换个名字试试？")])
+            )
             return
 
         self._nlp_query_count += 1
