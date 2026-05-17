@@ -8,32 +8,7 @@
                 "type": "string",
                 "default": "番禺",
                 "hint": "当使用 /天气 命令且不带地点参数时，默认查询此地的天气。例如：番禺、广州、北京"
-                },
-    "extreme_alert": {
-        "description": "⚠️ 极端天气预警主动推送",
-        "type": "object",
-        "items": {
-            "extreme_alert_enabled": {
-                "description": "✅ 启用极端天气预警推送",
-                "type": "bool",
-                "default": false,
-                "hint": "开启后，插件将每 30 分钟扫描监控地点的天气预报，检测到极端天气（如台风、暴雪、雷暴等）时自动推送预警到指定会话"
-            },
-            "extreme_alert_locations": {
-                "description": "📍 监控地点列表",
-                "type": "list",
-                "default": ["番禺"],
-                "hint": "输入需要监控极端天气的地点名称，每个条目一个地点。例如：番禺、广州、北京"
-            },
-            "extreme_alert_reminder_targets": {
-                "description": "📋 预警推送目标会话列表 (UMO)",
-                "type": "list",
-                "default": [],
-                "hint": "输入完整的 UMO。可通过 /sid 指令获取。格式: {平台名}:{消息类型}:{会话ID}"
             }
-        }
-    }
-}
         }
     },
     "nlp_weather": {
@@ -81,6 +56,30 @@
                 "type": "string",
                 "default": "番禺",
                 "hint": "推送天气时查询的地点。例如：番禺、北京、上海"
+            }
+        }
+    },
+    "extreme_alert": {
+        "description": "⚠️ 极端天气预警主动推送",
+        "type": "object",
+        "items": {
+            "extreme_alert_enabled": {
+                "description": "✅ 启用极端天气预警推送",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后，插件将每 30 分钟扫描监控地点的天气预报，检测到极端天气（如台风、暴雪、雷暴等）时自动推送预警到指定会话"
+            },
+            "extreme_alert_locations": {
+                "description": "📍 监控地点列表",
+                "type": "list",
+                "default": ["番禺"],
+                "hint": "输入需要监控极端天气的地点名称，每个条目一个地点。例如：番禺、广州、北京"
+            },
+            "extreme_alert_reminder_targets": {
+                "description": "📋 预警推送目标会话列表 (UMO)",
+                "type": "list",
+                "default": [],
+                "hint": "输入完整的 UMO。可通过 /sid 指令获取。格式: {平台名}:{消息类型}:{会话ID}"
             }
         }
     }
