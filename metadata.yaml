@@ -12,8 +12,9 @@ desc: |-
   - 自然语言天气触发（如"今天下雨了吗？"）
   - 每日定时推送天气简报
   - 无需 API Key，完全免费
+  - 全异步 aiohttp/httpx 架构，高并发丝滑响应
 repo: https://github.com/jinx7100/astrbot_plugin_tq
-version: v2.4.0
+version: v2.5.0
 tags:
   - 天气
   - 预报

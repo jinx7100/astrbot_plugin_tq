@@ -1,4 +1,4 @@
-import os, re, json, datetime, time, uuid, requests
+import os, re, json, datetime, time, uuid, asyncio
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image as ImageW
+import httpx
 
 import jieba
 
@@ -55,43 +56,44 @@ ICONS = {
     "foggy":"foggy.png","rainy":"rainy.png","snowy":"snowy.png",
 }
 
-# ── 缓存（带线程锁） ──
+# ── 缓存（带异步锁） ──
 _cache = {}
-_cache_lock = __import__('threading').Lock()
+_cache_lock = asyncio.Lock()
 WEA_CACHE_TTL = 1800  # 天气数据 30 分钟
 GEO_CACHE_TTL = 7200  # 地理编码 2 小时（地点几乎不变）
 
-def _cache_get(key):
-    with _cache_lock:
+async def _cache_get(key):
+    async with _cache_lock:
         ent = _cache.get(key)
     if ent and time.time() - ent["ts"] < ent.get("ttl", WEA_CACHE_TTL):
         return ent["data"]
     return None
 
-def _cache_set(key, data, ttl=None):
+async def _cache_set(key, data, ttl=None):
     if ttl is None:
         ttl = WEA_CACHE_TTL
-    with _cache_lock:
+    async with _cache_lock:
         _cache[key] = {"ts": time.time(), "ttl": ttl, "data": data}
 
 
-# ── 工具函数 ──
+# ── IO 工具函数（异步） ──
 
-def _geo_search(name):
+async def _geo_search(name):
     """调用 Open-Meteo 地理编码，优先返回中国结果"""
     try:
-        r = requests.get(GEO_API, params={"name":name,"count":5,"language":"zh","format":"json"}, timeout=10)
-        d = r.json().get("results")
-        if not d: return None
-        for item in d:
-            if item.get("country_code") == "CN":
-                return item
-        return d[0]
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(GEO_API, params={"name":name,"count":5,"language":"zh","format":"json"})
+            d = r.json().get("results")
+            if not d: return None
+            for item in d:
+                if item.get("country_code") == "CN":
+                    return item
+            return d[0]
     except Exception as e:
         logger.error(f"地理编码查询失败 (name={name}): {e}")
     return None
 
-def _geo(q):
+async def _geo(q):
     """
     地理编码 - 逐级 fallback：
       1. 缓存命中（2小时不过期）
@@ -104,24 +106,24 @@ def _geo(q):
     q = q.strip()
     if not q: return None
     # ── 地理编码长缓存 ──
-    cached = _cache_get(f"_geo_{q}")
+    cached = await _cache_get(f"_geo_{q}")
     if cached:
         return cached
 
-    def _cache_ret(r):
+    async def _cache_ret(r):
         if r:
-            _cache_set(f"_geo_{q}", r, GEO_CACHE_TTL)
+            await _cache_set(f"_geo_{q}", r, GEO_CACHE_TTL)
         return r
 
     # 1. 原始查询
-    ret = _geo_search(q)
-    if ret: return _cache_ret(ret)
+    ret = await _geo_search(q)
+    if ret: return await _cache_ret(ret)
 
     # 2. 去掉末尾 市/区/县
     cleaned = re.sub(r'[市区县]$', '', q)
     if cleaned and cleaned != q:
-        ret = _geo_search(cleaned)
-        if ret: return _cache_ret(ret)
+        ret = await _geo_search(cleaned)
+        if ret: return await _cache_ret(ret)
 
     # 3. 纯中文无分隔符 => 按 2 字切分
     if re.fullmatch(r'[\u4e00-\u9fff]+', q) and len(q) >= 4:
@@ -129,21 +131,21 @@ def _geo(q):
             left, right = q[:split_pos], q[split_pos:]
             candidates = [p for p in (left, right) if len(p) >= 2]
             for p in candidates:
-                ret = _geo_search(p)
-                if ret: return _cache_ret(ret)
+                ret = await _geo_search(p)
+                if ret: return await _cache_ret(ret)
 
     # 4. 按 市/区/县/空格 正则拆分
     parts = re.split(r'[市区县\s]+', q)
     parts = [p.strip() for p in parts if p.strip()]
     if len(parts) > 1:
         for p in parts:
-            ret = _geo_search(p)
-            if ret: return _cache_ret(ret)
+            ret = await _geo_search(p)
+            if ret: return await _cache_ret(ret)
 
     # 5. 末尾加"市"
     if not q.endswith("市"):
-        ret = _geo_search(q + "市")
-        if ret: return _cache_ret(ret)
+        ret = await _geo_search(q + "市")
+        if ret: return await _cache_ret(ret)
 
     return None
 
@@ -156,32 +158,35 @@ def _geo_fmt(d):
     if n not in parts: parts.append(n)
     return " ".join(parts)
 
-def _fetch_all(lat, lon):
-    """获取当前实时 + 3天逐日预报 + 24小时逐时"""
+async def _fetch_all(lat, lon):
+    """获取当前实时 + 3天逐日预报 + 24小时逐时（异步并行）"""
     now = None
     daily = None
     hourly = None
-    try:
-        r = requests.get(WEA_API, params={
-            "latitude":lat,"longitude":lon,
-            "current":"temperature_2m,relative_humidity_2m,apparent_temperature,weathercode,precipitation,wind_speed_10m",
-            "daily":"temperature_2m_max,temperature_2m_min,weathercode,precipitation_sum,precipitation_probability_max",
-            "timezone":"auto","forecast_days":3,
-        }, timeout=10).json()
-        now = r.get("current")
-        daily = r.get("daily")
-    except Exception as e:
-        logger.error(f"获取当前/逐日预报失败 (lat={lat}, lon={lon}): {e}")
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            r = await client.get(WEA_API, params={
+                "latitude":lat,"longitude":lon,
+                "current":"temperature_2m,relative_humidity_2m,apparent_temperature,weathercode,precipitation,wind_speed_10m",
+                "daily":"temperature_2m_max,temperature_2m_min,weathercode,precipitation_sum,precipitation_probability_max",
+                "timezone":"auto","forecast_days":3,
+            })
+            data = r.json()
+            now = data.get("current")
+            daily = data.get("daily")
+        except Exception as e:
+            logger.error(f"获取当前/逐日预报失败 (lat={lat}, lon={lon}): {e}")
 
-    try:
-        r = requests.get(WEA_API, params={
-            "latitude":lat,"longitude":lon,
-            "hourly":"temperature_2m,weathercode,precipitation_probability",
-            "timezone":"auto","forecast_hours":24,
-        }, timeout=10).json()
-        hourly = r.get("hourly")
-    except Exception as e:
-        logger.error(f"获取逐时预报失败 (lat={lat}, lon={lon}): {e}")
+        try:
+            r = await client.get(WEA_API, params={
+                "latitude":lat,"longitude":lon,
+                "hourly":"temperature_2m,weathercode,precipitation_probability",
+                "timezone":"auto","forecast_hours":24,
+            })
+            data = r.json()
+            hourly = data.get("hourly")
+        except Exception as e:
+            logger.error(f"获取逐时预报失败 (lat={lat}, lon={lon}): {e}")
 
     return now, daily, hourly
 
@@ -423,7 +428,7 @@ def _build_hourly_dict(hourly_raw):
 #  插件主类
 # ══════════════════════════════════════
 
-@register("天枢", "理予 & 金瑞", "查天气、3天预报、极端预警、自动带伞提醒、自然语言天气识别", "2.3.0", "")
+@register("天枢", "理予 & 金瑞", "查天气、3天预报、极端预警、自动带伞提醒、自然语言天气识别", "2.5.0", "")
 class TqPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
@@ -553,7 +558,7 @@ class TqPlugin(Star):
             logger.warning("天气提醒：未配置推送目标，跳过。")
             return
 
-        result = self._query_location(location)
+        result = await self._query_location(location)
         if not result:
             logger.error(f"天气提醒：查询不到地点「{location}」")
             return
@@ -646,7 +651,7 @@ class TqPlugin(Star):
             return
 
         for loc in locations:
-            result = self._query_location(loc)
+            result = await self._query_location(loc)
             if not result:
                 continue
 
@@ -678,7 +683,7 @@ class TqPlugin(Star):
             # ── 防重复推送 ──
             # 用缓存记录上次推送的预警hash + 时间戳
             dedup_key = f"_extreme_dedup_{loc_name}"
-            last = _cache_get(dedup_key)
+            last = await _cache_get(dedup_key)
             now_ts = time.time()
             alert_text = json.dumps(alerts, ensure_ascii=False)
 
@@ -689,7 +694,7 @@ class TqPlugin(Star):
                     continue
 
             # 记录本次推送
-            _cache_set(dedup_key, {"text": alert_text, "ts": now_ts})
+            await _cache_set(dedup_key, {"text": alert_text, "ts": now_ts})
 
             # ── 推送 ──
             msg = "⚠️ 【天枢极端天气预警】\n\n" + "\n".join(alerts)
@@ -713,20 +718,20 @@ class TqPlugin(Star):
         await self._unregister_reminder()
         await self._unregister_extreme_alert()
 
-    # ── 核心查询 ──
+    # ── 核心查询（异步） ──
 
-    def _query_location(self, q: str):
-        """查询某地天气，走缓存"""
+    async def _query_location(self, q: str):
+        """查询某地天气，走缓存（异步）"""
         key = q.strip()
-        cached = _cache_get(key)
+        cached = await _cache_get(key)
         if cached:
             self._cache_hit += 1
             return cached
         self._cache_miss += 1
-        g = _geo(q)
+        g = await _geo(q)
         if not g: return None
         loc_name = _geo_fmt(g)
-        now, daily, hourly_raw = _fetch_all(g["latitude"], g["longitude"])
+        now, daily, hourly_raw = await _fetch_all(g["latitude"], g["longitude"])
         if not now and not daily: return None
         result = {
             "loc_name": loc_name,
@@ -734,8 +739,8 @@ class TqPlugin(Star):
             "current": now, "daily": daily,
             "hourly_raw": hourly_raw,
         }
-        _cache_set(key, result)
-        _cache_set(loc_name, result)
+        await _cache_set(key, result)
+        await _cache_set(loc_name, result)
         return result
 
     # ── 命令: /天气 ──
@@ -749,16 +754,16 @@ class TqPlugin(Star):
         if args and args not in ("怎么样","咋样","怎样","如何","?"):
             q = args
             # 先尝试直接用参数查，查不到再用 NLP 提取
-            result = self._query_location(q)
+            result = await self._query_location(q)
             if not result:
                 # 尝试从自然语言中提取地点
                 nlp_loc = _extract_location_nlp(q)
                 if nlp_loc:
                     q = nlp_loc
-                    result = self._query_location(q)
+                    result = await self._query_location(q)
         else:
             q = self.default_loc
-            result = self._query_location(q)
+            result = await self._query_location(q)
 
         if not result:
             yield event.chain_result([Plain(f"没找到「{q}」，换个说法试试？")])
@@ -909,7 +914,7 @@ class TqPlugin(Star):
             location = self._get_cfg("nlp_weather_fallback", "广州")
 
         # 查询天气
-        result = self._query_location(location)
+        result = await self._query_location(location)
         if not result:
             await self.context.send_message(
                 event.unified_msg_origin,
